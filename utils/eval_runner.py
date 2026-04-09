@@ -1,4 +1,7 @@
 import numpy as np
+import pandas as pd
+
+from utils.eval_metrics import calculate_bis_metrics
 
 
 def _prepare_population(load_data_fn, preprocess_data_fn, generate_dataset_fn, sample_size=100):
@@ -23,7 +26,8 @@ def _print_results(results_df):
     print("EVALUATION RESULTS")
     print("=" * 60)
     print(f"\nEvaluated {len(results_df)} patients successfully\n")
-    print(results_df[["MDPE", "MDAPE", "Wobble", "Controlled (%)"]].describe())
+    controlled_col = "Controlled (%)" if "Controlled (%)" in results_df.columns else "TimeInTarget"
+    print(results_df[["MDPE", "MDAPE", "Wobble", controlled_col]].describe())
 
     best_idx = results_df["MDAPE"].idxmin()
     worst_idx = results_df["MDAPE"].idxmax()
@@ -32,13 +36,40 @@ def _print_results(results_df):
     print(f"  MDPE: {results_df.loc[best_idx, 'MDPE']:.2f}%")
     print(f"  MDAPE: {results_df.loc[best_idx, 'MDAPE']:.2f}%")
     print(f"  Wobble: {results_df.loc[best_idx, 'Wobble']:.2f}%")
-    print(f"  Controlled (%): {results_df.loc[best_idx, 'Controlled (%)']:.2f}%")
+    print(f"  Controlled (%): {results_df.loc[best_idx, controlled_col]:.2f}%")
 
     print(f"\n--- Worst Controlled Patient (ID: {results_df.loc[worst_idx, 'PatientID']}) ---")
     print(f"  MDPE: {results_df.loc[worst_idx, 'MDPE']:.2f}%")
     print(f"  MDAPE: {results_df.loc[worst_idx, 'MDAPE']:.2f}%")
     print(f"  Wobble: {results_df.loc[worst_idx, 'Wobble']:.2f}%")
-    print(f"  Controlled (%): {results_df.loc[worst_idx, 'Controlled (%)']:.2f}%")
+    print(f"  Controlled (%): {results_df.loc[worst_idx, controlled_col]:.2f}%")
+
+
+def _evaluate_population(evaluator, df_sim, duration_seconds=120 * 60):
+    """Evaluate population for evaluators exposing either evaluate(...) or simulate(...)."""
+    if hasattr(evaluator, "evaluate") and callable(getattr(evaluator, "evaluate")):
+        return evaluator.evaluate(df_sim)
+
+    if not (hasattr(evaluator, "simulate") and callable(getattr(evaluator, "simulate"))):
+        raise AttributeError("Evaluator must implement evaluate(df) or simulate(patient_row, duration_seconds)")
+
+    target_bis = float(getattr(evaluator, "target", 50.0))
+    rows = []
+
+    for _, patient in df_sim.iterrows():
+        bis_traj = evaluator.simulate(patient, duration_seconds)
+        metrics = calculate_bis_metrics(bis_traj, target_bis)
+        rows.append(
+            {
+                "PatientID": patient.get("PatientID", np.nan),
+                "MDPE": metrics["MDPE"],
+                "MDAPE": metrics["MDAPE"],
+                "Wobble": metrics["Wobble"],
+                "Controlled (%)": metrics["TimeInTarget"],
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def run_saved_dp_evaluation(dp_path, evaluator_cls, load_data_fn, preprocess_data_fn, generate_dataset_fn, sample_size=100):
@@ -76,7 +107,7 @@ def run_saved_dp_evaluation(dp_path, evaluator_cls, load_data_fn, preprocess_dat
         )
 
         print("\nRunning evaluation simulation (120 min per patient)...")
-        results_df = evaluator.evaluate(df_sim)
+        results_df = _evaluate_population(evaluator, df_sim)
         _print_results(results_df)
         return results_df
 
@@ -123,7 +154,7 @@ def run_saved_q_evaluation(q_path, evaluator_cls, load_data_fn, preprocess_data_
         )
 
         print("\nRunning evaluation simulation (120 min per patient)...")
-        results_df = evaluator.evaluate(df_sim)
+        results_df = _evaluate_population(evaluator, df_sim)
         _print_results(results_df)
         return results_df
 
@@ -150,7 +181,7 @@ def run_quick_dp_evaluation(dp_path, evaluator_cls, load_data_fn, preprocess_dat
         evaluator = evaluator_cls(dp_data["policy"], dp_data["actions"])
 
         print("Evaluating on Population...")
-        results_df = evaluator.evaluate(df_sim)
+        results_df = _evaluate_population(evaluator, df_sim)
         print("\n--- Evaluation Results Summary ---")
         print(results_df[["MDPE", "MDAPE", "Wobble", "Controlled (%)"]].describe())
 
@@ -178,7 +209,7 @@ def run_quick_q_evaluation(q_path, evaluator_cls, load_data_fn, preprocess_data_
         evaluator = evaluator_cls(q_data["Q"], q_data["actions"])
 
         print("Evaluating on Population...")
-        results_df = evaluator.evaluate(df_sim)
+        results_df = _evaluate_population(evaluator, df_sim)
         print("\n--- Evaluation Results Summary ---")
         print(results_df[["MDPE", "MDAPE", "Wobble", "Controlled (%)"]].describe())
 

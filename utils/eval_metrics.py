@@ -171,25 +171,25 @@ def create_summary_by_age_group(results_df, eval_lengths, age_groups=None):
 
 
 def save_evaluation_results(results_df, summary_df, algorithm_name, metrics_dir='metrics'):
-    """Save evaluation results to CSV files.
+    """Save evaluation results to JSON files.
     
     Args:
         results_df: Full results DataFrame (one row per patient)
         summary_df: Summary statistics DataFrame (one row per age group)
         algorithm_name: Name of algorithm (used for filename)
-        metrics_dir: Directory to save CSVs to
+        metrics_dir: Directory to save JSON files to
     """
     metrics_path = Path(metrics_dir)
     metrics_path.mkdir(parents=True, exist_ok=True)
     
     # Save full results
-    results_file = metrics_path / f'{algorithm_name}_results.csv'
-    results_df.to_csv(results_file, index=False)
+    results_file = metrics_path / f'{algorithm_name}_results.json'
+    results_df.to_json(results_file, orient='records', indent=2)
     print(f"Saved results to {results_file}")
     
     # Save summary
-    summary_file = metrics_path / f'{algorithm_name}_summary.csv'
-    summary_df.to_csv(summary_file, index=False)
+    summary_file = metrics_path / f'{algorithm_name}_summary.json'
+    summary_df.to_json(summary_file, orient='records', indent=2)
     print(f"Saved summary to {summary_file}")
 
 
