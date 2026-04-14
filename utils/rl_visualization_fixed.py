@@ -2,6 +2,43 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def _action_value_and_index(actions, action_sel):
+    """Resolve an action selection to a numeric action value and optional discrete index.
+
+    - If `action_sel` is an integer index, returns (actions[index], index).
+    - If `action_sel` is a float (continuous action), finds the closest value in
+      `actions` and returns (closest_value, index). If `actions` is None, returns
+      (float(action_sel), None).
+    """
+    if actions is None:
+        try:
+            return float(action_sel), None
+        except Exception:
+            return action_sel, None
+
+    # If already an integer index
+    if isinstance(action_sel, (int, np.integer)):
+        idx = int(action_sel)
+        return float(actions[idx]), idx
+
+    # Try to interpret as numeric value
+    try:
+        val = float(action_sel)
+    except Exception:
+        return action_sel, None
+
+    arr = np.array(actions, dtype=float)
+    # If exact match exists, use it
+    matches = np.where(arr == val)[0]
+    if matches.size > 0:
+        idx = int(matches[0])
+        return float(arr[idx]), idx
+
+    # Otherwise choose nearest bin
+    idx = int(np.argmin(np.abs(arr - val)))
+    return float(arr[idx]), idx
+
+
 def evaluate_policy(
     agent,
     n_episodes,
@@ -21,16 +58,18 @@ def evaluate_policy(
 
         err_prev = bis_fn(state[3]) - target
         ep_reward = 0.0
-        action_idx = agent.select_action(features_fn(err_prev, 0.0), training=False)
+        action_sel = agent.select_action(features_fn(err_prev, 0.0), training=False)
+        action_val, _ = _action_value_and_index(actions, action_sel)
         for step in range(ep_len):
-            state = np.maximum(pk_step_fn(state, actions[action_idx]), 0.0)
+            state = np.maximum(pk_step_fn(state, action_val), 0.0)
             err = bis_fn(state[3]) - target
             ep_reward += -abs(err)
 
             if (step + 1) % action_interval == 0:
-                action_idx = agent.select_action(
+                action_sel = agent.select_action(
                     features_fn(err, err - err_prev), training=False
                 )
+                action_val, _ = _action_value_and_index(actions, action_sel)
             err_prev = err
 
         rewards.append(ep_reward)
@@ -103,13 +142,15 @@ def plot_bis_trajectory(
 
     for t in range(ep_len):
         feat = features_fn(err_prev, 0.0)
-        action_idx = agent.select_action(feat, training=False)
+        action_sel = agent.select_action(feat, training=False)
+        action_val, action_idx = _action_value_and_index(actions, action_sel)
 
         bis_vals.append(bis_fn(state[3]))
-        actions_taken.append(actions[action_idx] * 60)
+        # store actual infusion rate (ml/min)
+        actions_taken.append(action_val * 60)
         times.append(t)
 
-        state = np.maximum(pk_step_fn(state, actions[action_idx]), 0.0)
+        state = np.maximum(pk_step_fn(state, action_val), 0.0)
         err = bis_fn(state[3]) - target
         err_prev = err
 
@@ -190,8 +231,9 @@ def plot_policy_heatmap(
     for i, derr in enumerate(derr_range):
         for j, err in enumerate(err_range):
             feat = features_fn(err, derr)
-            a = agent.select_action(feat, training=False)
-            policy[i, j] = actions[a] * 60
+            a_sel = agent.select_action(feat, training=False)
+            a_val, _ = _action_value_and_index(actions, a_sel)
+            policy[i, j] = a_val * 60
 
     fig, ax = plt.subplots(figsize=(12, 8))
     im = ax.imshow(
@@ -224,7 +266,7 @@ def plot_action_distribution(
     actions,
     save_path="images/action_distribution.png",
 ):
-    action_counts = np.zeros(len(actions))
+    action_counts = np.zeros(len(actions)) if actions is not None else None
 
     for _ in range(n_episodes):
         target = np.mean(bis_target_range)
@@ -234,33 +276,38 @@ def plot_action_distribution(
 
         for _ in range(ep_len):
             feat = features_fn(err_prev, 0.0)
-            action_idx = agent.select_action(feat, training=False)
-            action_counts[action_idx] += 1
-            state = np.maximum(pk_step_fn(state, actions[action_idx]), 0.0)
+            action_sel = agent.select_action(feat, training=False)
+            a_val, a_idx = _action_value_and_index(actions, action_sel)
+            if action_counts is not None and a_idx is not None:
+                action_counts[a_idx] += 1
+            state = np.maximum(pk_step_fn(state, a_val), 0.0)
             err_prev = bis_fn(state[3]) - target
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    action_labels = [f"{actions[i] * 60:.2f}" for i in range(len(actions))]
-    bars = ax.bar(
-        action_labels, action_counts, color="steelblue", alpha=0.8, edgecolor="black"
-    )
-    ax.set_xlabel("Infusion Rate (ml/min)", fontsize=12)
-    ax.set_ylabel("Frequency", fontsize=12)
-    ax.set_title(
-        "Action Distribution in Learned Policy", fontsize=14, fontweight="bold"
-    )
-    ax.grid(True, alpha=0.3, axis="y")
-
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            height,
-            f"{int(height)}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
+    if action_counts is None:
+        ax.text(0.5, 0.5, "No discrete actions provided", ha="center")
+    else:
+        action_labels = [f"{actions[i] * 60:.2f}" for i in range(len(actions))]
+        bars = ax.bar(
+            action_labels, action_counts, color="steelblue", alpha=0.8, edgecolor="black"
         )
+        ax.set_xlabel("Infusion Rate (ml/min)", fontsize=12)
+        ax.set_ylabel("Frequency", fontsize=12)
+        ax.set_title(
+            "Action Distribution in Learned Policy", fontsize=14, fontweight="bold"
+        )
+        ax.grid(True, alpha=0.3, axis="y")
+
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height,
+                f"{int(height)}",
+                ha="center",
+                va="bottom",
+                fontsize=10,
+            )
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
