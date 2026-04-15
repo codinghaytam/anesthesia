@@ -2,41 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def _action_value_and_index(actions, action_sel):
-    """Resolve an action selection to a numeric action value and optional discrete index.
-
-    - If `action_sel` is an integer index, returns (actions[index], index).
-    - If `action_sel` is a float (continuous action), finds the closest value in
-      `actions` and returns (closest_value, index). If `actions` is None, returns
-      (float(action_sel), None).
-    """
-    if actions is None:
-        try:
-            return float(action_sel), None
-        except Exception:
-            return action_sel, None
-
-    # If already an integer index
-    if isinstance(action_sel, (int, np.integer)):
-        idx = int(action_sel)
-        return float(actions[idx]), idx
-
-    # Try to interpret as numeric value
+def _to_float(action_sel):
     try:
-        val = float(action_sel)
+        return float(action_sel)
     except Exception:
-        return action_sel, None
-
-    arr = np.array(actions, dtype=float)
-    # If exact match exists, use it
-    matches = np.where(arr == val)[0]
-    if matches.size > 0:
-        idx = int(matches[0])
-        return float(arr[idx]), idx
-
-    # Otherwise choose nearest bin
-    idx = int(np.argmin(np.abs(arr - val)))
-    return float(arr[idx]), idx
+        return action_sel
 
 
 def evaluate_policy(
@@ -47,9 +17,16 @@ def evaluate_policy(
     bis_fn,
     features_fn,
     pk_step_fn,
-    actions,
     action_interval=1,
+    derr_weight=0.1,
+    action_interval_steps=10,
 ):
+    """Evaluate an agent whose outputs are continuous action values.
+
+    Reward includes penalty for BIS error changes over action intervals.
+    """
+    from collections import deque
+    
     rewards = []
     for _ in range(n_episodes):
         target = np.random.uniform(*bis_target_range)
@@ -58,18 +35,33 @@ def evaluate_policy(
 
         err_prev = bis_fn(state[3]) - target
         ep_reward = 0.0
-        action_sel = agent.select_action(features_fn(err_prev, 0.0), training=False)
-        action_val, _ = _action_value_and_index(actions, action_sel)
+        action_val = _to_float(agent.select_action(features_fn(err_prev, 0.0), training=False))
+        
+        # Track error history for interval-based delta penalty
+        err_history = deque(maxlen=action_interval_steps)
+        err_history.append(err_prev)
+        
         for step in range(ep_len):
             state = np.maximum(pk_step_fn(state, action_val), 0.0)
             err = bis_fn(state[3]) - target
-            ep_reward += -abs(err)
+            
+            # Compute delta BIS error over action interval
+            if len(err_history) == action_interval_steps:
+                derr_interval = err - err_history[0]
+            else:
+                derr_interval = err - err_prev
+            
+            # Combined reward: error penalty + interval-change penalty
+            r = -abs(err) - derr_weight * abs(derr_interval)
+            ep_reward += r
+            
+            # Update error history for next iteration
+            err_history.append(err)
 
             if (step + 1) % action_interval == 0:
-                action_sel = agent.select_action(
-                    features_fn(err, err - err_prev), training=False
+                action_val = _to_float(
+                    agent.select_action(features_fn(err, err - err_prev), training=False)
                 )
-                action_val, _ = _action_value_and_index(actions, action_sel)
             err_prev = err
 
         rewards.append(ep_reward)
@@ -85,15 +77,20 @@ def plot_training_curves(
 ):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
+    # Plot raw traces (may be empty)
     ax1.plot(rewards, alpha=0.6, linewidth=1, label="Episode Reward")
-    smoothed = np.convolve(rewards, np.ones(window) / window, mode="valid")
-    ax1.plot(
-        range(window - 1, len(rewards)),
-        smoothed,
-        "r-",
-        linewidth=2,
-        label=f"Moving Avg ({window})",
-    )
+
+    # Only compute and plot the moving average when there are enough points
+    if window > 0 and len(rewards) >= window:
+        smoothed = np.convolve(rewards, np.ones(window) / window, mode="valid")
+        ax1.plot(
+            range(window - 1, len(rewards)),
+            smoothed,
+            "r-",
+            linewidth=2,
+            label=f"Moving Avg ({window})",
+        )
+
     ax1.set_xlabel("Episode", fontsize=12)
     ax1.set_ylabel("Total Reward", fontsize=12)
     ax1.set_title("Training Rewards", fontsize=14, fontweight="bold")
@@ -101,14 +98,16 @@ def plot_training_curves(
     ax1.grid(True, alpha=0.3)
 
     ax2.plot(losses, alpha=0.6, linewidth=1, label="Bellman Loss")
-    smoothed_loss = np.convolve(losses, np.ones(window) / window, mode="valid")
-    ax2.plot(
-        range(window - 1, len(losses)),
-        smoothed_loss,
-        "g-",
-        linewidth=2,
-        label=f"Moving Avg ({window})",
-    )
+    if window > 0 and len(losses) >= window:
+        smoothed_loss = np.convolve(losses, np.ones(window) / window, mode="valid")
+        ax2.plot(
+            range(window - 1, len(losses)),
+            smoothed_loss,
+            "g-",
+            linewidth=2,
+            label=f"Moving Avg ({window})",
+        )
+
     ax2.set_xlabel("Episode", fontsize=12)
     ax2.set_ylabel("Loss", fontsize=12)
     ax2.set_title("Training Loss (MSE)", fontsize=14, fontweight="bold")
@@ -128,7 +127,6 @@ def plot_bis_trajectory(
     bis_fn,
     features_fn,
     pk_step_fn,
-    actions,
     save_path="images/bis_trajectory.png",
 ):
     c0 = 1.0
@@ -142,8 +140,7 @@ def plot_bis_trajectory(
 
     for t in range(ep_len):
         feat = features_fn(err_prev, 0.0)
-        action_sel = agent.select_action(feat, training=False)
-        action_val, action_idx = _action_value_and_index(actions, action_sel)
+        action_val = _to_float(agent.select_action(feat, training=False))
 
         bis_vals.append(bis_fn(state[3]))
         # keep display in ml/min (action already in ml/min)
@@ -183,12 +180,12 @@ def plot_bis_trajectory(
     ax1.set_ylim([0, 100])
 
     ax2.plot(times, actions_taken, "g-", linewidth=2, label="Infusion Rate")
-    ax2.set_ylim([0, 6])
     ax2.set_xlabel("Time (seconds)", fontsize=12)
     ax2.set_ylabel("Infusion Rate (ml/min)", fontsize=12)
     ax2.set_title("Agent Control Action", fontsize=14, fontweight="bold")
     ax2.legend(loc="best")
     ax2.grid(True, alpha=0.3)
+    ax2.set_ylim([0, 6])
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -223,7 +220,7 @@ def plot_q_values_heatmap(n_samples, q_max_fn, save_path="images/q_values_heatma
 
 
 def plot_policy_heatmap(
-    agent, n_samples, features_fn, actions, save_path="images/policy_heatmap.png"
+    agent, n_samples, features_fn, save_path="images/policy_heatmap.png"
 ):
     err_range = np.linspace(-50, 50, n_samples)
     derr_range = np.linspace(-10, 10, n_samples)
@@ -232,8 +229,7 @@ def plot_policy_heatmap(
     for i, derr in enumerate(derr_range):
         for j, err in enumerate(err_range):
             feat = features_fn(err, derr)
-            a_sel = agent.select_action(feat, training=False)
-            a_val, _ = _action_value_and_index(actions, a_sel)
+            a_val = _to_float(agent.select_action(feat, training=False))
             policy[i, j] = a_val * 60
 
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -264,10 +260,10 @@ def plot_action_distribution(
     bis_fn,
     features_fn,
     pk_step_fn,
-    actions,
     save_path="images/action_distribution.png",
+    bins=20,
 ):
-    action_counts = np.zeros(len(actions)) if actions is not None else None
+    action_values = []
 
     for _ in range(n_episodes):
         target = np.mean(bis_target_range)
@@ -277,38 +273,18 @@ def plot_action_distribution(
 
         for _ in range(ep_len):
             feat = features_fn(err_prev, 0.0)
-            action_sel = agent.select_action(feat, training=False)
-            a_val, a_idx = _action_value_and_index(actions, action_sel)
-            if action_counts is not None and a_idx is not None:
-                action_counts[a_idx] += 1
+            a_val = _to_float(agent.select_action(feat, training=False))
+            action_values.append(a_val * 60)
             state = np.maximum(pk_step_fn(state, a_val), 0.0)
             err_prev = bis_fn(state[3]) - target
 
+    # Histogram
     fig, ax = plt.subplots(figsize=(10, 6))
-    if action_counts is None:
-        ax.text(0.5, 0.5, "No discrete actions provided", ha="center")
-    else:
-        action_labels = [f"{actions[i] * 60:.2f}" for i in range(len(actions))]
-        bars = ax.bar(
-            action_labels, action_counts, color="steelblue", alpha=0.8, edgecolor="black"
-        )
-        ax.set_xlabel("Infusion Rate (ml/min)", fontsize=12)
-        ax.set_ylabel("Frequency", fontsize=12)
-        ax.set_title(
-            "Action Distribution in Learned Policy", fontsize=14, fontweight="bold"
-        )
-        ax.grid(True, alpha=0.3, axis="y")
-
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height,
-                f"{int(height)}",
-                ha="center",
-                va="bottom",
-                fontsize=10,
-            )
+    counts, edges, patches = ax.hist(action_values, bins=bins, color="steelblue", edgecolor="black")
+    ax.set_xlabel("Infusion Rate (ml/min)", fontsize=12)
+    ax.set_ylabel("Frequency", fontsize=12)
+    ax.set_title("Action Distribution in Learned Policy", fontsize=14, fontweight="bold")
+    ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")

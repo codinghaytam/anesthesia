@@ -106,7 +106,7 @@ def plot_bis_trajectory(
         action_idx = agent.select_action(feat, training=False)
 
         bis_vals.append(bis_fn(state[3]))
-        actions_taken.append(actions[action_idx] * 60)
+        actions_taken.append(actions[action_idx])
         times.append(t)
 
         state = np.maximum(pk_step_fn(state, actions[action_idx]), 0.0)
@@ -147,6 +147,7 @@ def plot_bis_trajectory(
     ax2.set_title("Agent Control Action", fontsize=14, fontweight="bold")
     ax2.legend(loc="best")
     ax2.grid(True, alpha=0.3)
+    ax2.set_ylim([0, 6])
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
