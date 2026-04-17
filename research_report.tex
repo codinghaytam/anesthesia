@@ -1,0 +1,427 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{geometry}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows, positioning, fit, calc}
+
+\geometry{margin=25mm}
+
+\sisetup{inter-unit-product=\cdot}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+}
+
+\pagenumbering{arabic}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\LARGE\bfseries Deep Reinforcement Learning for Automated Anesthesia Control\par}
+    \vspace{1.5cm}
+    
+    {\Large Mohamed Haytam Soukraty\par}
+    \vspace{0.5cm}
+    
+    {\large April 2026\par}
+    \vspace{2cm}
+    
+    \begin{abstract}
+        \noindent
+        This work presents four reinforcement learning approaches for automated propofol dosing during surgery, using BIS monitoring and PK/PD simulations. The algorithms range from tabular methods (Q-Learning, Dynamic Programming) to deep RL (DQN), all operating on a fuzzy state representation of BIS error dynamics. Our findings indicate that all models require additional training to achieve clinically acceptable performance, with Q-Learning showing the most severe under-training and DP-based methods demonstrating moderate control instability.
+    \end{abstract}
+    
+    \vspace{1.5cm}
+    \textbf{Keywords:} Reinforcement Learning, Anesthesia Control, BIS Monitoring, Propofol, PK/PD Modeling
+    
+\end{titlepage}
+
+\newpage
+
+\section{Introduction}
+
+Maintenance of adequate anesthesia depth during surgical procedures represents a critical challenge in modern medicine. The Bispectral Index (BIS) provides a validated measure of hypnotic state, enabling closed-loop control of anesthetic delivery. This work employs reinforcement learning to optimize propofol infusion rates, with the objective of maintaining BIS at a target value of 50 throughout surgery.
+
+The Schnider model provides pharmacokinetic and pharmacodynamic simulations that capture patient-specific drug response characteristics. Four distinct reinforcement learning algorithms are implemented and evaluated: tabular Q-Learning, Dynamic Programming Policy Iteration, Dynamic Programming Value Iteration, and Deep Q-Network (DQN).
+
+\section{State Representation and Actions}
+
+All algorithms share a common fuzzy state representation derived from BIS measurements. The state vector comprises two components:
+
+\begin{equation}
+    s = (\text{BIS\_ERROR}, \text{DELTA\_BIS})
+\end{equation}
+
+where BIS\_ERROR represents the difference between current BIS and target BIS ($\text{BIS} - \text{BIS}_{\text{target}} \in [-50, +50]$), and DELTA\_BIS captures the temporal derivative ($\text{BIS}[t] - \text{BIS}[t-1] \in [-30, +30]$).
+
+Each continuous value undergoes fuzzification using three membership functions (negative, zero, positive), yielding six fuzzy features. Discretized across 10 bins per feature, this creates a state space of $10^6$ discrete states.
+
+The action space consists of seven discrete propofol infusion rates:
+
+\begin{equation}
+    \mathcal{A} = \{0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0\} \ \text{ml/min}
+\end{equation}
+
+\section{Reinforcement Learning Models}
+
+\subsection{Q-Learning (Tabular)}
+
+Q-Learning is a model-free, off-policy algorithm that learns optimal action-values through temporal difference updates. The agent maintains a Q-table of size $10^6 \times 7$ and selects actions using an $\epsilon$-greedy policy.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1.5cm,
+        box/.style={rectangle, draw, minimum width=2.5cm, minimum height=1cm, align=center},
+        arrow/.style={->, thick},
+        >=stealth
+    ]
+    
+    \node (bis) [box] {$\text{BIS}[t]$};
+    \node (compute) [box, right=of bis] {Compute\\BIS\_ERROR,\\DELTA\_BIS};
+    \node (fuzzy) [box, right=of compute] {Fuzzy\\State $s$};
+    \node (qtable) [box, below=of fuzzy] {Q-Table\\$(10^6 \times 7)$};
+    \node (selection) [box, below=of qtable] {$\epsilon$-greedy\\Action Selection};
+    \node (reward) [box, right=of selection] {$r = -|\text{BIS\_ERROR}|$\\$- 0.5 \times |\text{DELTA\_BIS}|$};
+    \node (action) [box, below=of selection] {Action $a$};
+    
+    \draw[arrow] (bis) -- (compute);
+    \draw[arrow] (compute) -- (fuzzy);
+    \draw[arrow] (fuzzy) -- (qtable);
+    \draw[arrow] (qtable) -- (selection);
+    \draw[arrow] (selection) -- (action);
+    \draw[arrow] (selection) -- (reward);
+    
+    \end{tikzpicture}
+    \caption{Q-Learning architecture for anesthesia control}
+    \label{fig:qlearning}
+\end{figure}
+
+The reward function penalizes both absolute BIS error and oscillation:
+
+\begin{equation}
+    r = -|\text{BIS\_ERROR}| - 0.5 \times |\text{DELTA\_BIS}|
+\end{equation}
+
+\textbf{Hyperparameters:} $\text{EPISODES} = 1{,}000{,}000$, $\text{STEPS} = 120$, $\alpha = 0.2$, $\gamma = 0.69$, $\epsilon = 0.1$
+
+\textbf{Training Status:} Requires additional training. Current performance indicates insufficient propofol delivery, with MDPE remaining at approximately 94.79\%.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/training_curves.png}
+    \caption{Training convergence for Q-Learning agent}
+    \label{fig:q_training}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/q_values_heatmap.png}
+    \caption{Q-values heatmap across state space}
+    \label{fig:q_heatmap}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/action_distribution.png}
+    \caption{Action probability distribution}
+    \label{fig:action_dist}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/bis_trajectory.png}
+    \caption{Sample patient BIS trajectory during simulation}
+    \label{fig:bis_traj}
+\end{figure}
+
+\clearpage
+
+\subsection{Dynamic Programming --- Policy Iteration}
+
+Policy Iteration combines policy evaluation with iterative policy improvement. The algorithm alternates between computing state-action values via SARS' transitions and extracting the greedy policy.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1cm,
+        box/.style={rectangle, draw, minimum width=3cm, minimum height=0.8cm, align=center},
+        arrow/.style={->, thick},
+        >=stealth
+    ]
+    
+    \node (start) {};
+    \node (loop) [box, below=of start] {For each episode:\\BIS $\rightarrow$ Fuzzy State $\rightarrow$ Q-Update};
+    \node (update) [box, below=of loop] {$Q[s,a] \leftarrow Q[s,a] + \alpha[r + \gamma \max Q[s',:] - Q[s,a]]$};
+    \node (extract) [box, below=of update] {$\pi(s) = \arg\max_a Q(s,a)$};
+    \node (end) [below=of extract] {};
+    
+    \draw[arrow] (start) -- (loop);
+    \draw[arrow] (loop) -- (update);
+    \draw[arrow] (update) -- (extract);
+    \draw[->, thick, dashed] ($(extract.south east) + (0.5,0)$) arc[start angle=0, end angle=180, radius=2.5cm];
+    
+    \end{tikzpicture}
+    \caption{Policy Iteration training loop}
+    \label{fig:policy_iter}
+\end{figure}
+
+\textbf{Hyperparameters:} $\text{EPISODES} = 10{,}000$, $\text{STEPS} = 120$, $\alpha = 0.2$, $\gamma = 0.69$, $\epsilon = 0.1$
+
+\textbf{Training Status:} Requires additional training. High wobble (21.71\%) indicates control instability.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/dp_training_plots.png}
+    \caption{DP-Policy training progress}
+    \label{fig:dp_training}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/dp_last_episode_plot.png}
+    \caption{Final training episode behavior}
+    \label{fig:dp_episode}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/policy_heatmap.png}
+    \caption{Learned policy heatmap}
+    \label{fig:policy_heatmap}
+\end{figure}
+
+\clearpage
+
+\subsection{Dynamic Programming --- Value Iteration}
+
+Value Iteration computes optimal values directly via the Bellman optimality equation on a precomputed transition matrix. This approach assumes knowledge of the environment dynamics.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1cm,
+        box/.style={rectangle, draw, minimum width=3.5cm, minimum height=0.8cm, align=center},
+        arrow/.style={->, thick},
+        >=stealth
+    ]
+    
+    \node (transition) [box] {Compute: $P[s,a] = s'$, $R[s,a]$};
+    \node (iteration) [box, below=of transition] {Repeat until convergence:\\$Q[s,a] = R[s,a] + \gamma V[P[s,a]]$\\$V[s] = \max_a Q[s,a]$};
+    \node (policy) [box, below=of iteration] {$\pi(s) = \arg\max_a (R[s,a] + \gamma V[P[s,a]])$};
+    
+    \draw[arrow] (transition) -- (iteration);
+    \draw[arrow] (iteration) -- (policy);
+    
+    \end{tikzpicture}
+    \caption{Value Iteration algorithm structure}
+    \label{fig:value_iter}
+\end{figure}
+
+\textbf{Hyperparameters:} $\text{ITERATIONS} = 1{,}000{,}000$, $\gamma = 0.69$, $\epsilon = 0.1$
+
+\textbf{Training Status:} Shares policy with DP-Policy. Requires additional training.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/dp_bis_trajectory.png}
+    \caption{BIS trajectory under DP-Value policy}
+    \label{fig:dpvalue_traj}
+\end{figure}
+
+\clearpage
+
+\subsection{Deep Q-Network (DQN)}
+
+DQN employs a neural network to approximate Q-values, stabilized by experience replay and a separate target network.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        node distance=0.8cm,
+        box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.6cm, align=center},
+        arrow/.style={->, thick},
+        >=stealth
+    ]
+    
+    \node (input) [box] {Input (6)};
+    \node (fc1) [box, below=of input] {FC 256, ReLU};
+    \node (fc2) [box, below=of fc1] {FC 128, ReLU};
+    \node (output) [box, below=of fc2] {Output (7)};
+    
+    \draw[arrow] (input) -- (fc1);
+    \draw[arrow] (fc1) -- (fc2);
+    \draw[arrow] (fc2) -- (output);
+    
+    \end{tikzpicture}
+    \caption{DQN neural network architecture}
+    \label{fig:dqn_net}
+\end{figure}
+
+\textbf{Network Architecture:} Input(6) $\rightarrow$ FC(256, ReLU) $\rightarrow$ FC(128, ReLU) $\rightarrow$ Output(7)
+
+\textbf{Hyperparameters:} $\text{EPISODES} = 10{,}000$, $\text{STEPS} = 120$, $\text{LR} = 10^{-3}$, $\gamma = 0.69$, $\epsilon = 0.3 \rightarrow 0.01$, $\text{BUFFER} = 10{,}000$, $\text{BATCH} = 32$
+
+\textbf{Training Status:} Requires additional training. Performance similar to DP models.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/dqn_training_plots.png}
+    \caption{DQN training curves: loss and epsilon decay}
+    \label{fig:dqn_training}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{images/dqn_last_episode_plot.png}
+    \caption{DQN final episode behavior}
+    \label{fig:dqn_episode}
+\end{figure}
+
+\clearpage
+
+\section{PK/PD Model: Schnider}
+
+The Schnider model describes propofol pharmacokinetics using a three-compartment mammillary model with parameters estimated from patient demographics.
+
+\subsection{Compartmental Parameters}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Compartment model parameters}
+    \begin{tabular}{lcl}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} & \textbf{Description} \\
+        \midrule
+        $V_1$ & \SI{4.27}{L} & Central compartment volume \\
+        $V_2$ & \SI{18.9}{L} & Shallow peripheral compartment \\
+        $V_3$ & \SI{238.0}{L} & Deep peripheral compartment \\
+        $k_{10}$ & 0.38 & Elimination rate constant \\
+        $k_{12}$ & 0.30 & Central $\rightarrow$ Shallow \\
+        $k_{21}$ & 0.20 & Shallow $\rightarrow$ Central \\
+        $k_{13}$ & 0.19 & Central $\rightarrow$ Deep \\
+        $k_{31}$ & 0.0035 & Deep $\rightarrow$ Central \\
+        $k_{e0}$ & 0.17 & Effect site equilibration \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{BIS Model Parameters}
+
+\begin{table}[htbp]
+    \centering
+    \caption{BIS effect model parameters}
+    \begin{tabular}{lcl}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} & \textbf{Description} \\
+        \midrule
+        $\text{BIS}_0$ & 95.0 & Baseline BIS \\
+        $\text{BIS}_{\max}$ & 75.0 & Maximum BIS effect \\
+        $\text{EC}_{50}$ & \SI{3.5}{\micro\gram\per\mL} & Steady-state EC50 \\
+        $\gamma$ (Hill) & 2.5 & Hill coefficient \\
+        $\text{BIS}_{\text{target}}$ & 50.0 & Target BIS \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\clearpage
+
+\section{Evaluation Metrics}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Evaluation metrics definitions}
+    \begin{tabular}{lp{10cm}}
+        \toprule
+        \textbf{Metric} & \textbf{Description} \\
+        \midrule
+        MDPE & Median Prediction Error (\%); measures systematic bias \\
+        MDAPE & Median Absolute Prediction Error (\%); measures precision \\
+        Wobble & Median deviation from median PE (\%); measures stability \\
+        TimeInTarget & Percentage of time within $\pm5$ of target BIS \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Results}
+
+\subsection{Overall Performance}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Performance comparison across algorithms (3600s duration)}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Model} & \textbf{MDPE (\%)} & \textbf{MDAPE (\%)} & \textbf{Wobble (\%)} & \textbf{TimeInTarget (\%)} \\
+        \midrule
+        Q-Learning & 94.79 & 94.79 & 4.05 & 0.0 \\
+        DP-Policy & 78.35 & 86.25 & 21.71 & 0.0 \\
+        DP-Value & 78.35 & 86.25 & 21.71 & 0.0 \\
+        DQN & 78.35 & 86.25 & 21.71 & 0.0 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Performance by Age Group}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Performance metrics by age group (3600s duration)}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Age Group} & \textbf{N} & \textbf{MDPE (\%)} & \textbf{MDAPE (\%)} & \textbf{Wobble (\%)} \\
+        \midrule
+        25--29 & 19 & 78.49 & 86.19 & 21.51 \\
+        30--45 & 96 & 78.05 & 86.27 & 21.95 \\
+        46--60 & 139 & 78.18 & 86.19 & 21.82 \\
+        60--80 & 175 & 78.19 & 86.21 & 21.81 \\
+        80+ & 38 & 78.56 & 86.30 & 21.44 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Conclusions}
+
+All evaluated models require additional training to achieve clinically acceptable anesthesia control:
+
+\begin{itemize}
+    \item \textbf{Q-Learning:} Severely undertrained. The high MDPE of 94.79\% indicates BIS values remain near baseline (95), suggesting insufficient propofol delivery. The exploration-exploitation balance may require adjustment.
+    
+    \item \textbf{DP-Policy/Value:} Moderate training achieved. High wobble (21.71\%) demonstrates control instability with oscillating BIS values. The policy appears to struggle with maintaining steady-state control.
+    
+    \item \textbf{DQN:} Moderate training achieved. Performance mirrors DP-based methods, suggesting the neural network has not yet learned robust control policies.
+\end{itemize}
+
+\subsection{Recommended Next Steps}
+
+\begin{enumerate}
+    \item Increase training episodes significantly for all algorithms
+    \item Tune the reward function to encourage faster BIS reduction
+    \item Adjust hyperparameters (learning rate, discount factor, exploration rate)
+    \item Consider reward shaping to accelerate initial learning
+    \item Implement curriculum learning strategies
+\end{enumerate}
+
+\vfill
+
+\section*{Acknowledgments}
+
+This work was conducted as part of research into automated anesthesia control systems.
+
+\end{document}

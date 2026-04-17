@@ -1,11 +1,14 @@
 # Anesthesia RL Repository
 
-## Introduction
-This repository implements reinforcement learning algorithms for automated anesthesia control using BIS (Bispectral Index) monitoring. The models use PK/PD (Pharmacokinetic/Pharmacodynamic) simulations based on the Schnider model to optimize propofol infusion rates for maintaining target BIS levels during surgery.
+## Overview
+
+This repository implements reinforcement learning algorithms for automated anesthesia control. The models control propofol infusion rates to maintain target BIS (Bispectral Index) levels during surgery using PK/PD (Schnider model) simulations.
 
 ---
 
-## State Representation (All Algorithms)
+## State Representation
+
+All algorithms share the same fuzzy state representation:
 
 ```
 State = (BIS_ERROR, DELTA_BIS)
@@ -13,11 +16,9 @@ State = (BIS_ERROR, DELTA_BIS)
   └── DELTA_BIS = BIS[t] - BIS[t-1]   (range: -30 to +30)
 ```
 
-Both values are fuzzified into 3 membership functions (negative, zero, positive), creating 6 features × 10 bins = 1,000,000 possible states.
+Fuzzification: 3 membership functions × 2 values × 10 bins = 1,000,000 states.
 
----
-
-## Unified Actions
+## Actions
 
 ```
 ACTIONS = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0]  ml/min
@@ -25,9 +26,9 @@ ACTIONS = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0]  ml/min
 
 ---
 
-## Algorithms and Models
+## 1. Q-Learning (Tabular)
 
-### 1. Q-Learning (Tabular)
+A simple tabular RL approach using a Q-table to learn optimal propofol infusion policies.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -59,19 +60,15 @@ ACTIONS = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0]  ml/min
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Algorithm**: Tabular Q-Learning with epsilon-greedy exploration
-- **State Space**: 1,000,000 states (6 fuzzy features × 10 bins)
-- **Actions**: 7 discrete actions [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0] ml/min
-- **Hyperparameters**:
-  - EPISODES = 1000000
-  - STEPS_PER_EPISODE = 120
-  - ALPHA = 0.2
-  - GAMMA = 0.69
-  - EPSILON = 0.1
+**Hyperparameters**: EPISODES=1,000,000 | STEPS=120 | ALPHA=0.2 | GAMMA=0.69 | EPSILON=0.1
+
+**Status**: Needs more training — current performance shows insufficient propofol delivery.
 
 ---
 
-### 2. DP-Policy (Policy Iteration with BIS + Delta BIS)
+## 2. DP-Policy (Policy Iteration)
+
+Tabular Q-learning with iterative policy improvement. Learns Q-values through experience, then extracts the optimal policy.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -105,19 +102,15 @@ ACTIONS = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0]  ml/min
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Algorithm**: Tabular Q-Learning with fuzzy state representation
-- **State Space**: 1,000,000 states (6 fuzzy features × 10 bins)
-- **Actions**: 7 discrete actions [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0] ml/min
-- **Hyperparameters**:
-  - EPISODES = 10000
-  - STEPS_PER_EPISODE = 120
-  - ALPHA = 0.2
-  - GAMMA = 0.69
-  - EPSILON = 0.1
+**Hyperparameters**: EPISODES=10,000 | STEPS=120 | ALPHA=0.2 | GAMMA=0.69 | EPSILON=0.1
+
+**Status**: Needs more training — high wobble indicates unstable control.
 
 ---
 
-### 3. DP-Value (Value Iteration)
+## 3. DP-Value (Value Iteration)
+
+Dynamic programming approach that builds a transition model and uses Bellman equations to compute optimal values iteratively.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -156,18 +149,15 @@ ACTIONS = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0]  ml/min
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Algorithm**: Dynamic Programming Value Iteration
-- **State Space**: 1,000,000 states (6 fuzzy features × 10 bins)
-- **Actions**: 7 discrete actions [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0] ml/min
-- **Hyperparameters**:
-  - EPISODES = 1000000 (iterations)
-  - STEPS_PER_EPISODE = 120 (steps per iteration)
-  - GAMMA = 0.69
-  - EPSILON = 0.1 (for policy extraction)
+**Hyperparameters**: ITERATIONS=1,000,000 | GAMMA=0.69 | EPSILON=0.1
+
+**Status**: Needs more training — same policy as DP-Policy.
 
 ---
 
-### 4. DQN (Deep Q-Network)
+## 4. DQN (Deep Q-Network)
+
+Deep RL approach using a neural network to approximate Q-values, with experience replay and target network for stable training.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -219,114 +209,35 @@ ACTIONS = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0]  ml/min
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Algorithm**: Deep Q-Network with Experience Replay and Target Network
-- **State Space**: 6 fuzzy features (input to neural network)
-- **Actions**: 7 discrete actions [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0] ml/min
-- **Network Architecture**: Input(6) → FC(256, ReLU) → FC(128, ReLU) → Output(7)
-- **Hyperparameters**:
-  - EPISODES = 10000
-  - STEPS_PER_EPISODE = 120
-  - LEARNING_RATE = 1e-3
-  - GAMMA = 0.69
-  - EPSILON_START = 0.3 → EPSILON_END = 0.01 (decay 0.995)
-  - REPLAY_BUFFER = 10000
-  - BATCH_SIZE = 32
+**Architecture**: Input(6) → FC(256, ReLU) → FC(128, ReLU) → Output(7)
+
+**Hyperparameters**: EPISODES=10,000 | STEPS=120 | LR=1e-3 | GAMMA=0.69 | EPSILON=0.3→0.01 | BUFFER=10,000 | BATCH=32
+
+**Status**: Needs more training — similar performance to DP models.
 
 ---
 
-## PK/PD Parameters (Schnider Model)
+## PK/PD Model (Schnider)
 
 ### Compartmental Parameters
 | Parameter | Value | Description |
 |------------|-------|-------------|
-| V1 | 4.27 L | Central compartment volume |
-| V2 | 18.9 L | Shallow peripheral compartment |
-| V3 | 238.0 L | Deep peripheral compartment |
-| k10 | 0.38 | Elimination rate constant |
-| k12 | 0.30 | Central → Shallow peripheral |
-| k21 | 0.20 | Shallow peripheral → Central |
-| k13 | 0.19 | Central → Deep peripheral |
-| k31 | 0.0035 | Deep peripheral → Central |
-| ke0 | 0.17 | Effect site equilibration rate |
+| V1 | 4.27 L | Central compartment |
+| V2 | 18.9 L | Shallow peripheral |
+| V3 | 238.0 L | Deep peripheral |
+| k10 | 0.38 | Elimination rate |
+| k12/k21 | 0.30/0.20 | Shallow exchange |
+| k13/k31 | 0.19/0.0035 | Deep exchange |
+| ke0 | 0.17 | Effect site equilibration |
 
-### BIS Model Parameters
-| Parameter | Value | Description |
-|------------|-------|-------------|
-| BIS_0 | 95.0 | Baseline BIS value |
-| BIS_MAX | 75.0 | Maximum BIS effect |
-| EC50 | 3.5 μg/mL | Steady-state EC50 |
-| HILL | 2.5 | Hill coefficient |
-| BIS_TARGET | 50.0 | Target BIS during surgery |
-
----
-
-## Unified Hyperparameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| BIS_TARGET | 50.0 | Target BIS value |
-| STEPS_PER_EPISODE | 120 | Steps per training episode |
-| GAMMA | 0.69 | Discount factor |
-| EPSILON | 0.1 | Exploration rate (for policy extraction) |
-| EVAL_SAMPLE_SIZE | 500 | Number of patients for evaluation |
-| EVAL_EPISODE_LENGTHS | [300, 600, 1200, 3600] | Episode durations (seconds) |
-| RANDOM_SEED | 42 | Random seed for reproducibility |
-
----
-
-## Evaluation Metrics
-
-The following metrics are used to evaluate model performance:
-- **MDPE**: Median Prediction Error (%) - measure of bias
-- **MDAPE**: Median Absolute Prediction Error (%) - measure of precision
-- **Wobble**: Stability measure (%) - variability around median
-- **Time in Target**: % time within ±5 of BIS target
-
----
-
-## Age Groups
-- 25-29 years
-- 30-45 years
-- 46-60 years
-- 60-80 years
-- 80+ years
-
----
-
-## File Structure
-
-```
-anesthesia/
-├── DQN.ipynb                    # Deep Q-Network implementation
-├── Q learning.ipynb             # Tabular Q-Learning
-├── Dp-policy-bis-deltabis.ipynb # DP Policy iteration
-├── Dp-value-bis-deltabis.ipynb  # DP Value iteration
-├── artifacts/                   # Trained model files
-│   ├── dqn_bis_deltabis_network.pth
-│   ├── dp_policy_bis_deltabis_agent.npz
-│   ├── dp_bis_deltabis_agent.npz
-│   └── q_bis_deltabis_agent.npz
-├── metrics/                    # Evaluation results
-│   ├── dqn_bis_deltabis_results.json
-│   ├── dp_policy_bis_deltabis_results.json
-│   ├── dp_bis_deltabis_results.json
-│   └── q_bis_deltabis_results.json
-├── data/
-│   └── Patients Data.csv        # Patient database
-└── utils/
-    ├── eval_metrics.py          # Evaluation utilities
-    └── eval_runner.py           # Evaluation runner
-```
-
----
-
-## Usage
-
-1. Train a model by running the appropriate notebook
-2. Evaluation runs automatically after training
-3. Results are saved to the `metrics/` directory
-
-**Note**: If a trained model is not found, the evaluation will raise a RuntimeError prompting you to train first.
+### BIS Model
+| Parameter | Value |
+|-----------|-------|
+| BIS_0 | 95.0 |
+| BIS_MAX | 75.0 |
+| EC50 | 3.5 μg/mL |
+| HILL | 2.5 |
+| BIS_TARGET | 50.0 |
 
 ---
 
